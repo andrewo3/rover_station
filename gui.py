@@ -1,9 +1,301 @@
 import sys
 from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QDoubleValidator
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
 import numpy as np
+import datetime
+
+# ---------------------------
+# Control Tab Implementation
+# ---------------------------
+class ControlTab(QWidget):
+    def __init__(self):
+        super().__init__()
+
+        main_layout = QVBoxLayout(self)
+
+        # --- Top Buttons ---
+        button_layout = QHBoxLayout()
+        self.start_btn = QPushButton("Start Rover")
+        self.stop_btn = QPushButton("Stop Rover")
+        button_layout.addWidget(self.start_btn)
+        button_layout.addWidget(self.stop_btn)
+        button_layout.addStretch()
+        main_layout.addLayout(button_layout)
+
+        # --- Controller placeholders ---
+        controllers_layout = QHBoxLayout()
+        self.controller1 = QGroupBox("Controller 1")
+        self.controller2 = QGroupBox("Controller 2")
+        # Simple placeholder content
+        c1_layout = QVBoxLayout(self.controller1)
+        c1_layout.addWidget(QLabel("Controller 1 Visual Placeholder"), alignment=Qt.AlignCenter)
+        c2_layout = QVBoxLayout(self.controller2)
+        c2_layout.addWidget(QLabel("Controller 2 Visual Placeholder"), alignment=Qt.AlignCenter)
+        controllers_layout.addWidget(self.controller1, stretch=1)
+        controllers_layout.addWidget(self.controller2, stretch=1)
+        main_layout.addLayout(controllers_layout)
+
+        # --- Bottom Row: Arm Control & Drive Control ---
+        bottom_layout = QHBoxLayout()
+
+        # Arm Control Panel
+        self.arm_panel = self.create_arm_panel()
+        bottom_layout.addWidget(self.arm_panel, stretch=1)
+
+        # Drive Control Panel
+        self.drive_panel = self.create_drive_panel()
+        bottom_layout.addWidget(self.drive_panel, stretch=1)
+
+        main_layout.addLayout(bottom_layout)
+
+    def create_arm_panel(self):
+        panel = QGroupBox("Arm Control (Individual Motor + End Effector IK Control)")
+        layout = QVBoxLayout(panel)
+
+        # Switch for End Effector Control
+        self.ee_switch = QCheckBox("End Effector Control")
+        self.ee_switch.stateChanged.connect(self.toggle_arm_labels)
+        layout.addWidget(self.ee_switch)
+
+        # Arm labels (joint mode) and EE labels
+        self.joint_labels = ["Azimuth", "Shoulder", "Elbow", "Wrist1", "Wrist2", "Wrist3", "Gripper"]
+        self.ee_labels    = ["x", "y", "z", "Rx", "Ry", "Rz", "Gripper"]
+
+        # Storage for values for each mode (strings). Start with zeros.
+        self.joint_values = ["0.0"] * len(self.joint_labels)
+        self.ee_values = ["0.0"] * len(self.ee_labels)
+
+        # Create fields
+        self.arm_fields = []  # list of tuples (label_widget, edit_widget)
+        validator = QDoubleValidator(bottom=-1e6, top=1e6, decimals=6)
+        grid = QGridLayout()
+        for i, label in enumerate(self.joint_labels):
+            lbl = QLabel(label)
+            edit = QLineEdit()
+            edit.setValidator(validator)
+            edit.setText(self.joint_values[i])
+            # Wrist3 is greyed out in joint mode initially
+            if label == "Wrist3":
+                edit.setEnabled(False)
+            grid.addWidget(lbl, i, 0)
+            grid.addWidget(edit, i, 1)
+            self.arm_fields.append((lbl, edit))
+        layout.addLayout(grid)
+
+        # Get / Send buttons
+        btn_layout = QHBoxLayout()
+        self.get_btn = QPushButton("Get")
+        self.send_btn = QPushButton("Send")
+        self.get_btn.clicked.connect(self.on_get_arm)
+        self.send_btn.clicked.connect(self.on_send_arm)
+        btn_layout.addWidget(self.get_btn)
+        btn_layout.addWidget(self.send_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        return panel
+
+    def toggle_arm_labels(self):
+        """Swap labels between joint and EE mode, save & restore values, enable/disable Wrist3."""
+        # Determine which storage to save to and which to load from
+        if self.ee_switch.isChecked():
+            # switching into EE mode: save current joint values, load ee values
+            self._save_current_arm_values(to_joint=True)
+            self._load_arm_values(from_joint=False)
+            # enable Wrist3 in EE mode
+            _, wrist3_edit = self.arm_fields[5]
+            wrist3_edit.setEnabled(True)
+        else:
+            # switching into Joint mode: save current ee values, load joint values
+            self._save_current_arm_values(to_joint=False)
+            self._load_arm_values(from_joint=True)
+            # disable Wrist3 in joint mode
+            _, wrist3_edit = self.arm_fields[5]
+            wrist3_edit.setEnabled(False)
+
+    def _save_current_arm_values(self, to_joint: bool):
+        """Save the current edits into the appropriate storage.
+        If to_joint is True, we save UI values into joint_values (we are leaving joint mode),
+        otherwise we save UI values into ee_values."""
+        values = []
+        for _, edit in self.arm_fields:
+            text = edit.text().strip()
+            # Keep it as string even if empty so it can be reinstated
+            values.append(text if text != "" else "0.0")
+        if to_joint:
+            self.joint_values = values
+        else:
+            self.ee_values = values
+
+    def _load_arm_values(self, from_joint: bool):
+        """Load values into the UI. If from_joint True, load joint_values; otherwise load ee_values.
+           Also update labels to the corresponding names."""
+        if from_joint:
+            labels = self.joint_labels
+            values = self.joint_values
+        else:
+            labels = self.ee_labels
+            values = self.ee_values
+
+        for (lbl_widget, edit_widget), new_label, val in zip(self.arm_fields, labels, values):
+            lbl_widget.setText(new_label)
+            # set validator-safe text
+            edit_widget.setText(val if val is not None else "0.0")
+
+    def on_get_arm(self):
+        # Example: pretend to query hardware and update fields for current mode.
+        # We'll just set some dummy values for demonstration.
+        if self.ee_switch.isChecked():
+            # EE mode
+            sample = ["1.23", "4.56", "7.89", "0.1", "0.2", "0.3", "0.0"]
+            self.ee_values = sample
+            self._load_arm_values(from_joint=False)
+        else:
+            # Joint mode
+            sample = ["10.0", "20.0", "30.0", "5.0", "6.0", "7.0", "0.0"]
+            self.joint_values = sample
+            self._load_arm_values(from_joint=True)
+
+    def on_send_arm(self):
+        # Gather the current UI values and "send" them (placeholder)
+        current_values = [edit.text().strip() for _, edit in self.arm_fields]
+        if self.ee_switch.isChecked():
+            mode = "EE"
+            self.ee_values = [v if v != "" else "0.0" for v in current_values]
+        else:
+            mode = "Joint"
+            self.joint_values = [v if v != "" else "0.0" for v in current_values]
+        print(f"[Send Arm] Mode={mode}, values={current_values}")
+        # TODO: send to backend
+
+    def create_drive_panel(self):
+        panel = QGroupBox("Drive Control (Individual Motor / Velocity Control)")
+        layout = QVBoxLayout(panel)
+
+        grid = QGridLayout()
+        self.rpm_labels = []
+        self.target_fields = []
+
+        validator = QDoubleValidator(bottom=-1e6, top=1e6, decimals=3)
+
+        for i in range(6):
+            rpm_lbl = QLabel(f"Motor {i+1}: 0 RPM")
+            rpm_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            tgt_edit = QLineEdit()
+            tgt_edit.setValidator(validator)
+            tgt_edit.setPlaceholderText("target RPM")
+            grid.addWidget(rpm_lbl, i, 0)
+            grid.addWidget(tgt_edit, i, 1)
+            self.rpm_labels.append(rpm_lbl)
+            self.target_fields.append(tgt_edit)
+
+        layout.addLayout(grid)
+
+        # Play / Stop buttons with standard icons
+        btn_layout = QHBoxLayout()
+        play_icon = self.style().standardIcon(QStyle.SP_MediaPlay)
+        stop_icon = self.style().standardIcon(QStyle.SP_MediaStop)
+        self.play_btn = QPushButton()
+        self.play_btn.setIcon(play_icon)
+        self.play_btn.clicked.connect(self.on_drive_play)
+        self.stop_btn = QPushButton()
+        self.stop_btn.setIcon(stop_icon)
+        self.stop_btn.clicked.connect(self.on_drive_stop)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.play_btn)
+        btn_layout.addWidget(self.stop_btn)
+        layout.addLayout(btn_layout)
+
+        return panel
+
+    def on_drive_play(self):
+        # Collect targets and "start" drive control
+        targets = [edit.text().strip() for edit in self.target_fields]
+        print("[Drive] Play - targets:", targets)
+        # TODO: send to backend
+
+    def on_drive_stop(self):
+        print("[Drive] Stop")
+        # TODO: send stop command to backend
+
+# ---------------------------
+# Health Tab Implementation
+# ---------------------------
+class HealthTab(QWidget):
+    def __init__(self):
+        super().__init__()
+
+        main_layout = QVBoxLayout(self)
+
+        # ---- Grid of telemetry values ----
+        grid = QGridLayout()
+
+        # Battery (left)
+        grid.addWidget(QLabel("<b>Battery</b>"), 0, 0, alignment=Qt.AlignCenter)
+        self.batt_voltage = QLabel("xx.x V")
+        self.batt_percent = QLabel("xx.x%")
+        grid.addWidget(self.batt_voltage, 1, 0, alignment=Qt.AlignCenter)
+        grid.addWidget(self.batt_percent, 2, 0, alignment=Qt.AlignCenter)
+
+        # Power Draw (left, below Battery)
+        grid.addWidget(QLabel("<b>Power Draw</b>"), 3, 0, alignment=Qt.AlignCenter)
+        self.power_current = QLabel("xx.x A")
+        self.power_watts = QLabel("xx.x W")
+        grid.addWidget(self.power_current, 4, 0, alignment=Qt.AlignCenter)
+        grid.addWidget(self.power_watts, 5, 0, alignment=Qt.AlignCenter)
+
+        # VREFs (middle, stacked vertically)
+        grid.addWidget(QLabel("<b>18VREF</b>"), 0, 1, alignment=Qt.AlignCenter)
+        self.vref18 = QLabel("xx.x V")
+        grid.addWidget(self.vref18, 1, 1, alignment=Qt.AlignCenter)
+
+        grid.addWidget(QLabel("<b>12VREF</b>"), 2, 1, alignment=Qt.AlignCenter)
+        self.vref12 = QLabel("xx.x V")
+        grid.addWidget(self.vref12, 3, 1, alignment=Qt.AlignCenter)
+
+        grid.addWidget(QLabel("<b>5VREF</b>"), 4, 1, alignment=Qt.AlignCenter)
+        self.vref5 = QLabel("xx.x V")
+        grid.addWidget(self.vref5, 5, 1, alignment=Qt.AlignCenter)
+
+        # Signal (top right)
+        grid.addWidget(QLabel("<b>Signal</b>"), 0, 2, alignment=Qt.AlignCenter)
+        self.signal_24g = QLabel("2.4G: xx.x dBm")
+        self.signal_900m = QLabel("900M: xx.x dBm")
+        grid.addWidget(self.signal_24g, 1, 2, alignment=Qt.AlignCenter)
+        grid.addWidget(self.signal_900m, 2, 2, alignment=Qt.AlignCenter)
+
+        # Drive (right side, stacked)
+        grid.addWidget(QLabel("<b>Drive</b>"), 3, 2, alignment=Qt.AlignCenter)
+        self.drive_currents = []
+        for i in range(6):
+            lbl = QLabel(f"Motor {i+1}: xx.x A")
+            grid.addWidget(lbl, 4 + i, 2, alignment=Qt.AlignCenter)
+            self.drive_currents.append(lbl)
+
+        # Estimated Remaining Operation Time (bottom, centered)
+        grid.addWidget(QLabel("<b>Estimated Remaining Operation Time</b>"), 10, 1, alignment=Qt.AlignCenter)
+        self.remaining_time = QLabel("hh:mm:ss")
+        grid.addWidget(self.remaining_time, 11, 1, alignment=Qt.AlignCenter)
+
+        main_layout.addLayout(grid)
+
+        # ---- Log output ----
+        self.log_output = QTextEdit()
+        self.log_output.setReadOnly(True)
+        self.log_output.setStyleSheet("background-color: black; color: lime;")
+        main_layout.addWidget(self.log_output, stretch=1)
+
+        # ---- Example log updater ----
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.append_log)
+        self.timer.start(2000)  # every 2s
+
+    def append_log(self):
+        now = datetime.datetime.now().strftime("%H:%M:%S")
+        self.log_output.append(f"[{now}] Example rover status message")
 
 # ---------------------------
 # GPS Tab Implementation
@@ -279,9 +571,9 @@ class MainWindow(QMainWindow):
         # Make tabs expand equally across the whole width
         tabs.addTab(ShellTab(), "Shell")
         tabs.addTab(CameraTab(), "Camera")
-        tabs.addTab(GPSTab(), "GPS")
-        tabs.addTab(PlaceholderTab("Health"), "Health")
-        tabs.addTab(PlaceholderTab("Control"), "Control")
+        tabs.addTab(GPSTab(), "Navigation")
+        tabs.addTab(HealthTab(), "Health")
+        tabs.addTab(ControlTab(), "Control")
         tabs.addTab(PlaceholderTab("Science"), "Science")
         
         tab_bar = tabs.tabBar()
