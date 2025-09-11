@@ -1,12 +1,97 @@
 import sys
 from PySide6.QtWidgets import *
+from PySide6.QtSvgWidgets import QSvgWidget, QGraphicsSvgItem
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QDoubleValidator
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
 import numpy as np
+import controller
 import datetime
+import os
 
+
+class XboxControllerWidget(QWidget):
+    def __init__(self, asset_folder, index):
+        super().__init__()
+
+        self.asset_folder = asset_folder
+
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+
+        self.scene = QGraphicsScene()
+        self.view = QGraphicsView(self.scene)
+        
+        self.cont = None
+        # Base controller SVG
+        self.disconnected = QGraphicsSvgItem(os.path.join(asset_folder, "disconnected.svg"))
+        #self.disconnected.setFixedSize(400, 300)
+        self.base = QGraphicsSvgItem(os.path.join(asset_folder, "base-black.svg"))
+        self.scene.addItem(self.base)
+        self.scene.addItem(self.disconnected)
+        #self.base_controller.setFixedSize(400, 300)
+        self.abxy = QGraphicsSvgItem(os.path.join(asset_folder, "buttons.svg"))
+        
+        self.abxy_clips = {}
+        
+        
+        #self.scene.setSceneRect(0, 0, 750, 630)
+        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.view.setMinimumSize(300, 250)
+        layout.addWidget(self.view)
+        
+        self.view.setStyleSheet("background: transparent; border: none;")
+        
+        self.index = index
+        
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_controller_state)
+        self.timer.start(20)  # poll every 20 ms
+        
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Scale scene to fit the view every time
+        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        
+    def showEvent(self, event):
+        super().showEvent(event)
+        # ensure fitInView is applied once the widget is actually shown
+        QTimer.singleShot(0, lambda: self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio))
+        
+    def update_controller_state(self):
+        """
+        Scan for controllers and update button overlays when buttons are pressed.
+        """
+        if self.cont == None:
+            avail = controller.find_controllers() 
+            try:
+                self.cont = controller.PowerAController(avail[self.index])
+            except IndexError:
+                self.disconnected.setVisible(True)
+        else:
+            self.disconnected.setVisible(False)
+            if not self.cont.connected:
+                self.cont = None
+            
+            
+        """path = os.path.join(self.asset_folder, f"XB1_{button_name}.svg")
+
+        if pressed:
+            if button_name not in self.active_overlays:
+                overlay = QSvgWidget(path, self)
+                overlay.setFixedSize(400, 250)
+                overlay.raise_()
+                overlay.show()
+                self.active_overlays[button_name] = overlay
+        else:
+            if button_name in self.active_overlays:
+                self.active_overlays[button_name].deleteLater()
+                del self.active_overlays[button_name]"""
+                
+                
 # ---------------------------
 # Control Tab Implementation
 # ---------------------------
@@ -31,9 +116,9 @@ class ControlTab(QWidget):
         self.controller2 = QGroupBox("Controller 2")
         # Simple placeholder content
         c1_layout = QVBoxLayout(self.controller1)
-        c1_layout.addWidget(QLabel("Controller 1 Visual Placeholder"), alignment=Qt.AlignCenter)
+        c1_layout.addWidget(XboxControllerWidget("xbox-one",0), alignment=Qt.AlignCenter)
         c2_layout = QVBoxLayout(self.controller2)
-        c2_layout.addWidget(QLabel("Controller 2 Visual Placeholder"), alignment=Qt.AlignCenter)
+        c2_layout.addWidget(XboxControllerWidget("xbox-one",1), alignment=Qt.AlignCenter)
         controllers_layout.addWidget(self.controller1, stretch=1)
         controllers_layout.addWidget(self.controller2, stretch=1)
         main_layout.addLayout(controllers_layout)
@@ -121,24 +206,24 @@ class ControlTab(QWidget):
         If to_joint is True, we save UI values into joint_values (we are leaving joint mode),
         otherwise we save UI values into ee_values."""
         values = []
-        for _, edit in self.arm_fields:
+        for _, edit in self.arm_fields[:-1]:
             text = edit.text().strip()
             # Keep it as string even if empty so it can be reinstated
             values.append(text if text != "" else "0.0")
         if to_joint:
-            self.joint_values = values
+            self.joint_values[:-1] = values
         else:
-            self.ee_values = values
+            self.ee_values[:-1] = values
 
     def _load_arm_values(self, from_joint: bool):
         """Load values into the UI. If from_joint True, load joint_values; otherwise load ee_values.
            Also update labels to the corresponding names."""
         if from_joint:
             labels = self.joint_labels
-            values = self.joint_values
+            values = self.joint_values[:-1]
         else:
             labels = self.ee_labels
-            values = self.ee_values
+            values = self.ee_values[:-1]
 
         for (lbl_widget, edit_widget), new_label, val in zip(self.arm_fields, labels, values):
             lbl_widget.setText(new_label)
