@@ -45,6 +45,7 @@ class ButtonData(ctypes.Structure):
 
 class PowerAController():
     def __init__(self,id):
+        self.started = False
         self.dev = usb.core.find(idVendor=_POWER_A_VENDOR, idProduct=id)
         time.sleep(0.5)
         self.dev.set_configuration()
@@ -72,7 +73,23 @@ class PowerAController():
         self.runningThread.join()
         self.kill_connection()
         
+    def rumble(self,num_pulses=1,pulse_length=0x80,forces=[0.1,0.1,0.1,0.1]):
+        start_rumble = b'\x09\x08\x00\x08\x00'
+        bitmask = 0
+        for f in range(4):
+            if forces[f] > 0:
+                bitmask |= 1 << f
+        start_rumble += bytes([bitmask])
         
+        forces = [(int(i*256))>>2 for i in forces]
+        start_rumble += bytes(forces)
+        
+        start_rumble += bytes([pulse_length])
+        start_rumble += b'\x00'
+        start_rumble += bytes([num_pulses])
+        
+        self.dev.write(self.ep_out.bEndpointAddress,start_rumble)    
+    
     def operation(self):
         self.read_buttons()
         
@@ -84,9 +101,12 @@ class PowerAController():
         self.dev.write(self.ep_out.bEndpointAddress,b'\x01\x20\x00\x00\x00\x00\x00\x00\x00\x0e',timeout=0)
     
     def read_buttons(self):
+        self.started = True
         while self.connected:
             try:
                 self.data = self.dev.read(self.ep_in.bEndpointAddress, 256,timeout=1)
+                if len(self.data) == 0:
+                    continue
             except usb.core.USBTimeoutError:
                 continue
             except usb.core.USBError:

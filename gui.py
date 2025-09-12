@@ -1,8 +1,9 @@
 import sys
 from PySide6.QtWidgets import *
 from PySide6.QtSvgWidgets import QSvgWidget, QGraphicsSvgItem
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QDoubleValidator
+from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QRectF
+from PySide6.QtGui import QDoubleValidator, QTransform, QPainter
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,11 +11,42 @@ import controller
 import datetime
 import os
 
+next_scan = 0
+num_controllers = 2
+
+class CroppedSvgItem(QGraphicsSvgItem):
+    def __init__(self, filename):
+        super().__init__(filename)
+        self._crop = None  # QRectF in item-local coordinates
+
+    def setCropRect(self, rect: QRectF | None):
+        """rect is in the item's local coordinates (before item's transform)."""
+        self._crop = QRectF(rect) if rect is not None else None
+        self.update()  # request repaint
+
+    def paint(self, painter: QPainter, option, widget):
+        if self._crop:
+            painter.save()
+            # clip in the item-local coordinate system (this is the painter's
+            # coordinate system inside paint())
+            painter.setClipRect(self._crop)
+            super().paint(painter, option, widget)
+            painter.restore()
+        else:
+            super().paint(painter, option, widget)
+
+class ControllerScanner(QThread):
+    found = Signal(list)  # Emits list of available controllers
+
+    def run(self):
+        avail = controller.find_controllers()
+        self.found.emit(avail)
 
 class XboxControllerWidget(QWidget):
     def __init__(self, asset_folder, index):
         super().__init__()
 
+        self.scanner = None
         self.asset_folder = asset_folder
 
         layout = QVBoxLayout(self)
@@ -23,6 +55,7 @@ class XboxControllerWidget(QWidget):
         self.scene = QGraphicsScene()
         self.view = QGraphicsView(self.scene)
         
+        self.joy_dist = 25
         self.cont = None
         # Base controller SVG
         self.disconnected = QGraphicsSvgItem(os.path.join(asset_folder, "disconnected.svg"))
@@ -31,12 +64,120 @@ class XboxControllerWidget(QWidget):
         self.scene.addItem(self.base)
         self.scene.addItem(self.disconnected)
         #self.base_controller.setFixedSize(400, 300)
-        self.abxy = QGraphicsSvgItem(os.path.join(asset_folder, "buttons.svg"))
+        self.abxy = QSvgRenderer(os.path.join(asset_folder, "buttons.svg"))
+        self.lbumper = QGraphicsSvgItem(os.path.join(asset_folder, "bumper.svg"))
+        self.rbumper = QGraphicsSvgItem(os.path.join(asset_folder, "bumper.svg"))
+        self.rbumper.setTransform(QTransform().scale(-1,1))
+
+        self.dpad = QSvgRenderer(os.path.join(asset_folder, "dpad.svg"))
+
+        self.startback = QSvgRenderer(os.path.join(asset_folder, "start-select.svg"))
+
+        self.stick = QSvgRenderer(os.path.join(asset_folder, "stick.svg"))
+        self.ltrigger = CroppedSvgItem(os.path.join(asset_folder, "trigger.svg"))
+        self.rtrigger = CroppedSvgItem(os.path.join(asset_folder, "trigger.svg"))
+        self.rtrigger.setTransform(QTransform().scale(-1,1))
+
+        self.scene.addItem(self.lbumper)
+        self.scene.addItem(self.rbumper)
+
+        self.lbumper.setPos(107,130)
+        self.rbumper.setPos(645,130)
+
+        self.lbumper.setVisible(False)
+        self.rbumper.setVisible(False)
+
+        self.scene.addItem(self.ltrigger)
+        self.scene.addItem(self.rtrigger)
+
+        self.ltrigger.setPos(152,0)
+        self.rtrigger.setPos(598,0)
+
+        self.ltrigger.setVisible(True)
+        self.rtrigger.setVisible(True)
         
-        self.abxy_clips = {}
+        self.button_svgs = {}
+
+        for button in ["A","B","X","Y"]:
+            self.button_svgs[button] = []
+            for state in ["Unpressed","Pressed"]:
+                item = QGraphicsSvgItem()
+                item.setSharedRenderer(self.abxy)
+                item.setElementId(button + "-"+ state)
+                item.setVisible(False)
+                self.scene.addItem(item)
+                self.button_svgs[button].append(item)
+                if button == "A":
+                    item.setPos(540,300)
+                elif button == "Y":
+                    item.setPos(540,200)
+                elif button == "X":
+                    item.setPos(490,250)
+                elif button == "B":
+                    item.setPos(590,250)
         
+        for pad in ["up","down","left","right"]:
+            item = QGraphicsSvgItem()
+            item.setSharedRenderer(self.dpad)
+            item.setElementId("dpad-"+ pad)
+            item.setVisible(False)
+            self.scene.addItem(item)
+            if pad == "up":
+                item.setPos(260,345)
+            elif pad == "down":
+                item.setPos(260,400)
+            elif pad == "left":
+                item.setPos(222,385)
+            elif pad == "right":
+                item.setPos(275,385)
+            self.button_svgs[pad] = item
+
+        for button in ["start","back"]:
+            item = QGraphicsSvgItem()
+            item.setSharedRenderer(self.startback)
+            item.setElementId(button)
+            item.setVisible(False)
+            self.scene.addItem(item)
+            if button == "start":
+                item.setPos(413,263)
+            elif button == "back":
+                item.setPos(305,263)
+            self.button_svgs[button] = item
+
+        for joy in ["Left","Right"]:
+            self.button_svgs[joy[0]+"S"] = []
+            for state in ["Unpressed","Pressed"]:
+                item = QGraphicsSvgItem()
+                item.setSharedRenderer(self.stick)
+                item.setElementId("Joy-"+ state)
+                item.setVisible(True)
+                if joy == "Left":
+                    item.setPos(145,240)
+                elif joy == "Right":
+                    item.setPos(431,352)
+                self.scene.addItem(item)
+                self.button_svgs[joy[0]+"S"].append(item)
+
+
+        self.button_svgs["LT"] = self.ltrigger
+        self.button_svgs["RT"] = self.rtrigger
+
+        self.button_svgs["LB"] = self.lbumper
+        self.button_svgs["RB"] = self.rbumper
+
+        self.amax = np.pi/6
+
+        self.disconnected.setZValue(10)
+        self.disconnected.setVisible(True)
+
+        self.scan_timer = QTimer()
+        self.scan_timer.timeout.connect(self.check_controllers)
+        self.scan_timer.start(500)
+
+        self.cont_timer = QTimer()
+        self.cont_timer.timeout.connect(self.run_controllers)
+        self.cont_timer.start(30)
         
-        #self.scene.setSceneRect(0, 0, 750, 630)
         self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -47,10 +188,112 @@ class XboxControllerWidget(QWidget):
         
         self.index = index
         
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_controller_state)
-        self.timer.start(20)  # poll every 20 ms
-        
+    
+    def joyMat(self,x,y):
+        r = 1/np.sin(self.amax)
+        d = np.hypot(x,-y)
+        if d != 0:
+            sx = np.sqrt(r**2-(d/r)**2)/r
+            sy = 1
+            sAng = -y/d
+            cAng = x/d 
+            M = QTransform(
+                cAng, sAng,
+                -sAng, cAng,
+                0, 0
+            )
+            N = QTransform(
+                sx*cAng, -sx*sAng,
+                sy*sAng, sy*cAng,
+                0, 0
+            )
+            M*=N
+        else:
+            M = QTransform(
+                1, 0,
+                0, 1,
+                0, 0
+            )
+        return M
+
+
+    def run_controllers(self):
+        if self.cont:
+            self.button_svgs["A"][self.cont.button_data.a].setVisible(True)
+            self.button_svgs["A"][not self.cont.button_data.a].setVisible(False)
+
+            self.button_svgs["B"][self.cont.button_data.b].setVisible(True)
+            self.button_svgs["B"][not self.cont.button_data.b].setVisible(False)
+
+            self.button_svgs["X"][self.cont.button_data.x].setVisible(True)
+            self.button_svgs["X"][not self.cont.button_data.x].setVisible(False)
+
+            self.button_svgs["Y"][self.cont.button_data.y].setVisible(True)
+            self.button_svgs["Y"][not self.cont.button_data.y].setVisible(False)
+
+            self.button_svgs["LB"].setVisible(self.cont.button_data.bumper_left)
+            self.button_svgs["RB"].setVisible(self.cont.button_data.bumper_right)
+
+            self.button_svgs["up"].setVisible(self.cont.button_data.dpad_up)
+            self.button_svgs["down"].setVisible(self.cont.button_data.dpad_down)
+            self.button_svgs["left"].setVisible(self.cont.button_data.dpad_left)
+            self.button_svgs["right"].setVisible(self.cont.button_data.dpad_right)
+
+            self.button_svgs["start"].setVisible(self.cont.button_data.start)
+            self.button_svgs["back"].setVisible(self.cont.button_data.back)
+
+            self.button_svgs["LS"][self.cont.button_data.stick_left_click].setVisible(True)
+            lx,ly = self.cont.button_data.stick_left_x/(1<<15),-self.cont.button_data.stick_left_y/(1<<15)
+            self.button_svgs["LS"][self.cont.button_data.stick_left_click].setPos(145+lx*self.joy_dist,240+ly*self.joy_dist)
+            center_x = self.button_svgs["LS"][self.cont.button_data.stick_left_click].boundingRect().width() / 2
+            center_y = self.button_svgs["LS"][self.cont.button_data.stick_left_click].boundingRect().height() / 2
+            T = QTransform()
+            T.translate(-center_x,-center_y)
+            T *= self.joyMat(lx,ly)
+            T.translate(center_x,center_y)
+            self.button_svgs["LS"][self.cont.button_data.stick_left_click].setTransform(T)
+            self.button_svgs["LS"][not self.cont.button_data.stick_left_click].setVisible(False)
+
+            self.button_svgs["RS"][self.cont.button_data.stick_right_click].setVisible(True)
+            rx,ry = self.cont.button_data.stick_right_x/(1<<15),-self.cont.button_data.stick_right_y/(1<<15)
+            self.button_svgs["RS"][self.cont.button_data.stick_right_click].setPos(431+rx*self.joy_dist,352+ry*self.joy_dist)
+            center_x = self.button_svgs["RS"][self.cont.button_data.stick_right_click].boundingRect().width() / 2
+            center_y = self.button_svgs["RS"][self.cont.button_data.stick_right_click].boundingRect().height() / 2
+            T = QTransform()
+            T.translate(-center_x,-center_y)
+            T *= self.joyMat(rx,ry)
+            T.translate(center_x,center_y)
+            self.button_svgs["RS"][self.cont.button_data.stick_right_click].setTransform(T)
+            self.button_svgs["RS"][not self.cont.button_data.stick_right_click].setVisible(False)
+
+            tw = 88.934
+            th = 121.795
+            lamt = float(self.cont.button_data.trigger_left/(1<<10))
+            self.button_svgs["LT"].setCropRect(QRectF(0,th-th*lamt,tw,th*lamt))
+
+            ramt = float(self.cont.button_data.trigger_right/(1<<10))
+            self.button_svgs["RT"].setCropRect(QRectF(0,th-th*ramt,tw,th*ramt))
+
+    def scan_controllers(self):
+        global next_scan
+        if next_scan != self.index:
+            return
+        next_scan = -1
+        self.scanner = ControllerScanner()
+        self.scanner.found.connect(self.update_controller)
+        self.scanner.finished.connect(self.scan_finished)
+        self.scanner.start() 
+
+    def scan_finished(self):
+        global next_scan, num_controllers
+        self.scanner = None
+        next_scan = (self.index + 1) % num_controllers
+
+    def check_controllers(self):
+        if self.cont is None or (self.cont.started and not self.cont.connected):
+            # Start a background scan
+            self.scan_controllers()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         # Scale scene to fit the view every time
@@ -61,35 +304,15 @@ class XboxControllerWidget(QWidget):
         # ensure fitInView is applied once the widget is actually shown
         QTimer.singleShot(0, lambda: self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio))
         
-    def update_controller_state(self):
+    def update_controller(self, avail):
         """
         Scan for controllers and update button overlays when buttons are pressed.
         """
-        if self.cont == None:
-            avail = controller.find_controllers() 
-            try:
-                self.cont = controller.PowerAController(avail[self.index])
-            except IndexError:
-                self.disconnected.setVisible(True)
-        else:
+        try:
+            self.cont = controller.PowerAController(avail[self.index])
             self.disconnected.setVisible(False)
-            if not self.cont.connected:
-                self.cont = None
-            
-            
-        """path = os.path.join(self.asset_folder, f"XB1_{button_name}.svg")
-
-        if pressed:
-            if button_name not in self.active_overlays:
-                overlay = QSvgWidget(path, self)
-                overlay.setFixedSize(400, 250)
-                overlay.raise_()
-                overlay.show()
-                self.active_overlays[button_name] = overlay
-        else:
-            if button_name in self.active_overlays:
-                self.active_overlays[button_name].deleteLater()
-                del self.active_overlays[button_name]"""
+        except IndexError as e:
+            self.disconnected.setVisible(True)
                 
                 
 # ---------------------------
