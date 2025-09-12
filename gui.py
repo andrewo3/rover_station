@@ -3,7 +3,7 @@ from PySide6.QtWidgets import *
 from PySide6.QtSvgWidgets import QSvgWidget, QGraphicsSvgItem
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QRectF
-from PySide6.QtGui import QDoubleValidator, QTransform, QPainter
+from PySide6.QtGui import QDoubleValidator, QTransform, QPainter, QPalette, QColor
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
 import numpy as np
@@ -165,7 +165,7 @@ class XboxControllerWidget(QWidget):
         self.button_svgs["LB"] = self.lbumper
         self.button_svgs["RB"] = self.rbumper
 
-        self.amax = np.pi/6
+        self.amax = np.pi/5
 
         self.disconnected.setZValue(10)
         self.disconnected.setVisible(True)
@@ -891,6 +891,8 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setStyle(QStyleFactory.create("Fusion"))
+
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
