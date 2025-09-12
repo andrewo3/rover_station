@@ -165,7 +165,7 @@ class XboxControllerWidget(QWidget):
         self.button_svgs["LB"] = self.lbumper
         self.button_svgs["RB"] = self.rbumper
 
-        self.amax = np.pi/5
+        self.amax = np.pi/4.5
 
         self.disconnected.setZValue(10)
         self.disconnected.setVisible(True)

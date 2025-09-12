@@ -1,6 +1,4 @@
 pyside6
 matplotlib
 pyusb
-libusb
-pywinusb
-hidapi
+numpy
