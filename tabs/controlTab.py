@@ -162,7 +162,7 @@ class XboxControllerWidget(QWidget):
         self.button_svgs["LB"] = self.lbumper
         self.button_svgs["RB"] = self.rbumper
 
-        self.amax = np.pi/4.5
+        self.amax = np.pi/6
 
         self.disconnected.setZValue(10)
         self.disconnected.setVisible(True)
@@ -190,7 +190,7 @@ class XboxControllerWidget(QWidget):
         r = 1/np.sin(self.amax)
         d = np.hypot(x,-y)
         if d != 0:
-            sx = np.sqrt(r**2-(d/r)**2)/r
+            sx = np.sqrt(1-(d/r)**2)
             sy = 1
             sAng = -y/d
             cAng = x/d 
