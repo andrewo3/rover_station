@@ -220,7 +220,9 @@ class ShellTab(QWidget):
         # Right panel (interactive shell area)
         # -------------------
         #self.conv = Ansi2HTMLConverter(inline=True)
-        self.worker = SSHWorker("rover-jetson.local", "rover", password="[REPLACE WITH PASSWORD]")
+        with open(".ssh_login","r") as f:
+            login = f.readlines()
+        self.worker = SSHWorker(login[0], login[1], password=login[2])
         self.shell = InteractiveShell(self.worker)
         splitter.addWidget(self.shell)
         

@@ -162,7 +162,7 @@ class XboxControllerWidget(QWidget):
         self.button_svgs["LB"] = self.lbumper
         self.button_svgs["RB"] = self.rbumper
 
-        self.amax = np.pi/6
+        self.amax = np.pi/5.5
 
         self.disconnected.setZValue(10)
         self.disconnected.setVisible(True)
@@ -186,25 +186,31 @@ class XboxControllerWidget(QWidget):
         self.index = index
         
     
-    def joyMat(self,x,y):
+    def joyMat(self,x,y,cx,cy):
         r = 1/np.sin(self.amax)
         d = np.hypot(x,-y)
+        d_sc = np.clip(d,0,1)
         if d != 0:
-            sx = np.sqrt(1-(d/r)**2)
+            sx = np.sqrt(1-(d_sc/r)**2)
             sy = 1
             sAng = -y/d
             cAng = x/d 
+            print(cx,cy)
             M = QTransform(
+                1, 0,
+                0, 1,
+                -cx, -cy
+            )
+            M *= QTransform(
                 cAng, sAng,
                 -sAng, cAng,
                 0, 0
             )
-            N = QTransform(
+            M *= QTransform(
                 sx*cAng, -sx*sAng,
                 sy*sAng, sy*cAng,
-                0, 0
+                cx + d_sc*cAng*self.joy_dist, cy - d_sc*sAng*self.joy_dist
             )
-            M*=N
         else:
             M = QTransform(
                 1, 0,
@@ -241,25 +247,26 @@ class XboxControllerWidget(QWidget):
 
             self.button_svgs["LS"][self.cont.button_data.stick_left_click].setVisible(True)
             lx,ly = self.cont.button_data.stick_left_x/(1<<15),-self.cont.button_data.stick_left_y/(1<<15)
-            self.button_svgs["LS"][self.cont.button_data.stick_left_click].setPos(145+lx*self.joy_dist,240+ly*self.joy_dist)
+            #self.button_svgs["LS"][self.cont.button_data.stick_left_click].setPos(145+lx*self.joy_dist,240+ly*self.joy_dist)
             center_x = self.button_svgs["LS"][self.cont.button_data.stick_left_click].boundingRect().width() / 2
             center_y = self.button_svgs["LS"][self.cont.button_data.stick_left_click].boundingRect().height() / 2
             T = QTransform()
-            T.translate(-center_x,-center_y)
-            T *= self.joyMat(lx,ly)
             T.translate(center_x,center_y)
+            T *= self.joyMat(lx,ly,center_x,center_y)
+            T.translate(-center_x,-center_y)
             self.button_svgs["LS"][self.cont.button_data.stick_left_click].setTransform(T)
             self.button_svgs["LS"][not self.cont.button_data.stick_left_click].setVisible(False)
 
             self.button_svgs["RS"][self.cont.button_data.stick_right_click].setVisible(True)
             rx,ry = self.cont.button_data.stick_right_x/(1<<15),-self.cont.button_data.stick_right_y/(1<<15)
-            self.button_svgs["RS"][self.cont.button_data.stick_right_click].setPos(431+rx*self.joy_dist,352+ry*self.joy_dist)
+            #self.button_svgs["RS"][self.cont.button_data.stick_right_click].setPos(431+rx*self.joy_dist,352+ry*self.joy_dist)
             center_x = self.button_svgs["RS"][self.cont.button_data.stick_right_click].boundingRect().width() / 2
             center_y = self.button_svgs["RS"][self.cont.button_data.stick_right_click].boundingRect().height() / 2
             T = QTransform()
-            T.translate(-center_x,-center_y)
-            T *= self.joyMat(rx,ry)
-            T.translate(center_x,center_y)
+            #T.translate(center_x,center_y)
+            self.button_svgs["RS"][self.cont.button_data.stick_right_click].setTransformOriginPoint(center_x,center_y)
+            T *= self.joyMat(rx,ry,center_x,center_y)
+            #T.translate(-center_x,-center_y)
             self.button_svgs["RS"][self.cont.button_data.stick_right_click].setTransform(T)
             self.button_svgs["RS"][not self.cont.button_data.stick_right_click].setVisible(False)
 
