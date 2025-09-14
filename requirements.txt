@@ -2,3 +2,6 @@ pyside6
 matplotlib
 pyusb
 numpy
+pexpect
+ansi2html
+pyte
