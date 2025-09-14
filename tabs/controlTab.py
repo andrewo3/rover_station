@@ -195,7 +195,6 @@ class XboxControllerWidget(QWidget):
             sy = 1
             sAng = -y/d
             cAng = x/d 
-            print(cx,cy)
             M = QTransform(
                 1, 0,
                 0, 1,
