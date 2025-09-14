@@ -104,7 +104,8 @@ class PowerAController():
         self.started = True
         while self.connected:
             try:
-                self.data = self.dev.read(self.ep_in.bEndpointAddress, 256,timeout=1)
+                self.data = self.dev.read(self.ep_in.bEndpointAddress, 256,timeout=10)
+                print(self.data)
                 if len(self.data) == 0:
                     continue
             except usb.core.USBTimeoutError:
