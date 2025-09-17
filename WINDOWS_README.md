@@ -1,0 +1,2 @@
+## Important for Windows Users
+If you are running on Windows please run with WSL and [usbipd](https://learn.microsoft.com/en-us/windows/wsl/connect-usb)! The pxssh feature will not work as it is not supported directly on windows. After launching in wsl, run `usbipd list` to find the controller's bus id, followed by `usbipd attach --wsl --busid [bus id] -a`
