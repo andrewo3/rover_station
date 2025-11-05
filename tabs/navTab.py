@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
@@ -28,20 +29,21 @@ class NavTab(QWidget):
         survey_btn = QPushButton("Survey Base")
         survey_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         left_layout.addWidget(survey_btn, alignment=Qt.AlignLeft)
-
+        
         # Coordinates label ABOVE the map
         coords_row = QHBoxLayout()
         coords_row.addStretch()
         self.coords_label = QLabel("Rover: (0,0)\nBase: (0,0)")
         coords_row.addWidget(self.coords_label, alignment=Qt.AlignRight)
-        left_layout.addLayout(coords_row, stretch=0)  # minimal height
+        left_layout.addLayout(coords_row, stretch=0)
 
-        # Map placeholder (expands to fill space)
-        self.map_widget = QLabel("Map with Rover + Base Dots")
-        self.map_widget.setStyleSheet("background-color: lightgray; border: 1px solid black;")
+        # Web view map
+        self.map_widget = QWebEngineView()
         self.map_widget.setMinimumSize(400, 300)
-        self.map_widget.setAlignment(Qt.AlignCenter)
-        left_layout.addWidget(self.map_widget, stretch=1)  # dominant space
+        self.map_widget.setUrl("https://www.openstreetmap.org")
+        left_layout.addWidget(self.map_widget, stretch=1)
+
+        # --------------------
 
         # Distance + heading row UNDER the map
         metrics_row = QHBoxLayout()

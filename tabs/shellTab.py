@@ -5,18 +5,19 @@ from PySide6.QtCore import Signal, QObject, Qt
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QFont
 from pexpect import pxssh
 import pyte
-from pexpect.exceptions import TIMEOUT
+from pexpect.exceptions import TIMEOUT, EOF
 
 def render_pyte_screen_as_html(screen):
-    html_lines = []
+    html_lines = ["" for i in range(len(screen.buffer.items()))]
     for y, row in screen.buffer.items():        # row = dict of column -> Char
         line_html = ""
         for x in range(screen.columns):
             char = row.get(x)
             if char is None:
-                line_html += " "
+                line_html += "&nbsp;"
             else:
-                text = char.data
+                #print(type(char))
+                text = char.data.replace(" ", "&nbsp;")
                 style = []
                 if char.fg:
                     color = "white" if char.fg == "default" else char.fg
@@ -32,7 +33,7 @@ def render_pyte_screen_as_html(screen):
                     line_html += f"<span style='{';'.join(style)}'>{text}</span>"
                 else:
                     line_html += text
-        html_lines.append(line_html)
+        html_lines[y] = line_html
 
     return "<br>".join(html_lines)
 
@@ -52,18 +53,40 @@ class SSHWorker(QObject):
         self.cols = 80
         self.rows = 30
         self.screen = pyte.Screen(self.cols, self.rows)
+        
+        self.fail_screen = pyte.Screen(self.cols, self.rows)
+        self.fail_screen.buffer[0][0] = pyte.screens.Char('No SSH Connection', fg='red', bg='black', bold=True)
+        
         self.stream = pyte.ByteStream()
         self.stream.attach(self.screen)
+        self.connected = False
 
     def start(self):
         def run():
-            try:
-                self.session = pxssh.pxssh()
-                self.session.login(self.host, self.user, password=self.password, auto_prompt_reset=False)
-                self.session.send("\r")
-                self.output_ready.emit("[Connected to SSH]\n")
-
-                while self.running:
+            while self.running:
+                if not self.connected:
+                    print("trying connection...")
+                    self.session = pxssh.pxssh()
+                    try:
+                        self.session.login(self.host, self.user, password=self.password, auto_prompt_reset=False)
+                    except pxssh.ExceptionPxssh as e:
+                        print("connection failed",e)
+                        self.connected = False
+                        self.output_ready.emit("[SSH Login Failed]\n")
+                        continue
+                        
+                    self.session.PROMPT = r"rover\@rover-jetson"  # custom prompt regex
+                    self.session.send("\r")
+                    success = self.session.prompt(timeout=5)
+                    if success:
+                        self.session.send("clear;neofetch\r")
+                        self.output_ready.emit("[Connected to SSH]\n")
+                        self.connected = True
+                    else:
+                        print("connection failed")
+                        self.output_ready.emit("[SSH Login Failed]\n")
+                        continue
+                else:
                     try:
                         data = self.session.read_nonblocking(size=1024, timeout=0.01)
                         if data:
@@ -75,18 +98,23 @@ class SSHWorker(QObject):
                             screen_text = "\n".join(self.screen.display)
                             self.output_ready.emit(screen_text)
                     except pxssh.ExceptionPxssh:
-                        break
+                        self.connected = False
+                        self.output_ready.emit("[SSH Disconnected]\n")
+                        continue
+                    except EOF:
+                        self.connected = False
+                        self.output_ready.emit("[SSH Disconnected]\n")
+                        continue
                     except TIMEOUT:
                         continue
                     except Exception as e:
+                        print(e)
                         continue
-            except Exception as e:
-                self.output_ready.emit(f"[Error: {e}]\n")
 
         threading.Thread(target=run, daemon=True).start()
 
     def send_input(self, text):
-        if self.session:
+        if self.session and self.connected:
             self.session.send(text)
 
     def stop(self):
@@ -147,6 +175,9 @@ class InteractiveShell(QTextEdit):
                 return
             elif key == Qt.Key_L:
                 self.worker.send_input("\x0C")  # ^L
+                return
+            elif key == Qt.Key_X:
+                self.worker.send_input("\x18")  # ^X
                 return
 
         # Enter, Tab, Backspace, etc. → send raw codes
@@ -234,7 +265,10 @@ class ShellTab(QWidget):
 
         
     def display_output(self, screen_text):
-        html = render_pyte_screen_as_html(self.worker.screen)
+        if self.worker.connected:
+            html = render_pyte_screen_as_html(self.worker.screen)
+        else:
+            html = render_pyte_screen_as_html(self.worker.fail_screen)
         self.shell.setHtml(html)
         self.shell.setCursor()
 

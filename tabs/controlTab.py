@@ -492,7 +492,7 @@ class ControlTab(QWidget):
 
         validator = QDoubleValidator(bottom=-1e6, top=1e6, decimals=3)
 
-        for i in range(6):
+        for i in range(4):
             rpm_lbl = QLabel(f"Motor {i+1}: 0 RPM")
             rpm_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             tgt_edit = QLineEdit()

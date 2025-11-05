@@ -1,6 +1,9 @@
 from PySide6.QtWidgets import *
 from PySide6.QtCore import Qt, QTimer
 import datetime
+import socket
+import threading
+from time import sleep
 
 # ---------------------------
 # Health Tab Implementation
@@ -47,6 +50,9 @@ class HealthTab(QWidget):
         self.signal_900m = QLabel("900M: xx.x dBm")
         grid.addWidget(self.signal_24g, 1, 2, alignment=Qt.AlignCenter)
         grid.addWidget(self.signal_900m, 2, 2, alignment=Qt.AlignCenter)
+        self.connected = False
+        self.connection_thread = threading.Thread(target=self.connect_socket,daemon=True)
+        self.connection_thread.start()
 
         # Drive (right side, stacked)
         grid.addWidget(QLabel("<b>Drive</b>"), 3, 2, alignment=Qt.AlignCenter)
@@ -71,9 +77,35 @@ class HealthTab(QWidget):
 
         # ---- Example log updater ----
         self.timer = QTimer()
-        self.timer.timeout.connect(self.append_log)
-        self.timer.start(2000)  # every 2s
-
-    def append_log(self):
+        self.timer.timeout.connect(self.update)
+        self.timer.start(1000)  # every 2s
+        
+    def connect_socket(self):
+        while True:
+            if not self.connected:
+                try:
+                    self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.sock.connect(("10.242.187.175",3000))
+                    splash_text = self.sock.recv(1024).decode()
+                    print(splash_text)
+                    self.connected = True
+                except ConnectionRefusedError:
+                    continue
+            else:
+                try:
+                    self.sock.send(b"network status")
+                    resp = self.sock.recv(1024).decode()
+                    lines = resp.splitlines()
+                    values = lines[2].split()
+                    quality = int(values[2].strip("."))
+                    signal = int(values[3].strip("."))
+                    noise = int(values[4].strip("."))
+                    SNR = signal - noise
+                    self.signal_24g.setText(f"2.4G: {SNR} dB - Quality: {quality}%")
+                    sleep(2)
+                except Exception as e:
+                    self.connected = False
+                    print(e)
+    def update(self):
         now = datetime.datetime.now().strftime("%H:%M:%S")
         self.log_output.append(f"[{now}] Example rover status message")

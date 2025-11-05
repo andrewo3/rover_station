@@ -5,3 +5,4 @@ numpy
 pexpect
 ansi2html
 pyte
+paramiko
