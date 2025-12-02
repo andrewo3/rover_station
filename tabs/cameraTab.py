@@ -1,5 +1,51 @@
 from PySide6.QtWidgets import *
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QImage, QPixmap, QPainter
+
+import gi
+gi.require_version('Gst', '1.0')
+from gi.repository import Gst, GObject, GstVideo
+
+import numpy as np
+
+Gst.init(None)
+
+#Video Widget
+class VideoWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setMinimumSize(640, 480)
+        self.pixmap = None
+
+        # Create GStreamer pipeline
+        self.pipeline = Gst.parse_launch(
+            "avfvideosrc device-index=0 ! videoconvert ! video/x-raw,format=RGB ! appsink name=sink emit-signals=True"
+        )
+        self.appsink = self.pipeline.get_by_name("sink")
+        self.appsink.connect("new-sample", self.on_new_sample)
+
+        self.pipeline.set_state(Gst.State.PLAYING)
+
+    def on_new_sample(self, sink):
+        sample = sink.emit("pull-sample")
+        buf = sample.get_buffer()
+        caps = sample.get_caps()
+        width = caps.get_structure(0).get_value("width")
+        height = caps.get_structure(0).get_value("height")
+        result, mapinfo = buf.map(Gst.MapFlags.READ)
+        if result:
+            arr = np.frombuffer(mapinfo.data, dtype=np.uint8)
+            arr = arr.reshape((height, width, 3))
+            image = QImage(arr.data, width, height, 3 * width, QImage.Format.Format_RGB888)
+            self.pixmap = QPixmap.fromImage(image)
+            self.update()
+            buf.unmap(mapinfo)
+        return Gst.FlowReturn.OK
+
+    def paintEvent(self, event):
+        if self.pixmap:
+            painter = QPainter(self)
+            painter.drawPixmap(0, 0, self.width(), self.height(), self.pixmap)
 
 # ---------------------------
 # Camera Tab Implementation
@@ -26,11 +72,8 @@ class CameraTab(QWidget):
         # Left side: feed + nav buttons
         feed_with_nav = QVBoxLayout()
 
-        # Live feed placeholder
-        self.live_feed = QLabel("Live Camera Feed")
-        self.live_feed.setStyleSheet("background-color: black; color: white; border: 1px solid gray;")
-        self.live_feed.setAlignment(Qt.AlignCenter)
-        self.live_feed.setMinimumSize(400, 300)
+        #Camera live feed
+        self.live_feed = VideoWidget()
         feed_with_nav.addWidget(self.live_feed)
 
         # Navigation row (same width as feed)
