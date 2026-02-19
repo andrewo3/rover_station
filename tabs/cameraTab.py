@@ -16,11 +16,30 @@ class VideoWidget(QWidget):
         super().__init__()
         self.setMinimumSize(640, 480)
         self.pixmap = None
+        self.analog = False
 
-        # Create GStreamer pipeline
-        self.pipeline = Gst.parse_launch(
-            "avfvideosrc device-index=0 ! videoconvert ! video/x-raw,format=RGB ! appsink name=sink emit-signals=True"
-        )
+        if self.analog:
+            # --- Analog camera pipeline ---
+            pipeline_desc = (
+                "avfvideosrc device-index=0 ! "
+                "videoconvert ! "
+                "video/x-raw,format=RGB ! "
+                "appsink name=sink emit-signals=True sync=false"
+            )
+        else:
+            # --- Digital UDP H264 pipeline ---
+            pipeline_desc = (
+                "udpsrc port=5000 caps=\"application/x-rtp, media=video, encoding-name=H264, payload=96\" ! "
+                "rtpjitterbuffer latency=0 ! "
+                "rtph264depay ! "
+                "avdec_h264 ! "
+                "videoconvert ! "
+                "video/x-raw,format=RGB ! "
+                "appsink name=sink emit-signals=True sync=false"
+            )
+
+        self.pipeline = Gst.parse_launch(pipeline_desc)
+
         self.appsink = self.pipeline.get_by_name("sink")
         self.appsink.connect("new-sample", self.on_new_sample)
 
@@ -30,22 +49,40 @@ class VideoWidget(QWidget):
         sample = sink.emit("pull-sample")
         buf = sample.get_buffer()
         caps = sample.get_caps()
-        width = caps.get_structure(0).get_value("width")
-        height = caps.get_structure(0).get_value("height")
-        result, mapinfo = buf.map(Gst.MapFlags.READ)
-        if result:
-            arr = np.frombuffer(mapinfo.data, dtype=np.uint8)
-            arr = arr.reshape((height, width, 3))
-            image = QImage(arr.data, width, height, 3 * width, QImage.Format.Format_RGB888)
-            self.pixmap = QPixmap.fromImage(image)
-            self.update()
-            buf.unmap(mapinfo)
+
+        structure = caps.get_structure(0)
+        width = structure.get_value("width")
+        height = structure.get_value("height")
+
+        success, mapinfo = buf.map(Gst.MapFlags.READ)
+        if not success:
+            return Gst.FlowReturn.ERROR
+
+        arr = np.frombuffer(mapinfo.data, dtype=np.uint8)
+        arr = arr.reshape((height, width, 3))
+
+        image = QImage(
+            arr.data,
+            width,
+            height,
+            3 * width,
+            QImage.Format.Format_RGB888
+        )
+
+        self.pixmap = QPixmap.fromImage(image)
+        self.update()
+
+        buf.unmap(mapinfo)
         return Gst.FlowReturn.OK
 
     def paintEvent(self, event):
-        if self.pixmap:
-            painter = QPainter(self)
-            painter.drawPixmap(0, 0, self.width(), self.height(), self.pixmap)
+        if not self.pixmap:
+            return
+
+        painter = QPainter(self)
+        painter.drawPixmap(
+            0, 0, self.width(), self.height(), self.pixmap
+        )
 
 # ---------------------------
 # Camera Tab Implementation

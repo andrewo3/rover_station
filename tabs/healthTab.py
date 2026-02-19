@@ -85,7 +85,7 @@ class HealthTab(QWidget):
             if not self.connected:
                 try:
                     self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    self.sock.connect(("10.242.187.175",3000))
+                    self.sock.connect(("192.168.0.10",3000))
                     splash_text = self.sock.recv(1024).decode()
                     print(splash_text)
                     self.connected = True
